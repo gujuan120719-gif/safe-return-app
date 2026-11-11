@@ -25,6 +25,12 @@ export interface MapFilterState {
   bell: boolean;
 }
 
+export interface DestinationPoint {
+  latitude: number;
+  longitude: number;
+  name: string;
+}
+
 export type RouteType = 'safe' | 'shortest';
 
 export interface RouteOption {

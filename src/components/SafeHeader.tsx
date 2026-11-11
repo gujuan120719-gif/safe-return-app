@@ -1,58 +1,115 @@
-import React from 'react';
-import { MapFilterState, LocationCoords } from '../types';
-import { ShieldCheck, Video, Lightbulb, BellRing } from 'lucide-react';
+import React, { useState } from 'react';
+import { MapFilterState, LocationCoords, DestinationPoint } from '../types';
+import { Search, MapPin, X, Video, Lightbulb, BellRing, Navigation } from 'lucide-react';
 
 interface SafeHeaderProps {
   coords: LocationCoords;
   filters: MapFilterState;
   onToggleFilter: (type: keyof MapFilterState) => void;
-  isSimulating: boolean;
+  destination: DestinationPoint | null;
+  onSelectDestination: (dest: DestinationPoint) => void;
+  onClearDestination: () => void;
 }
 
 export const SafeHeader: React.FC<SafeHeaderProps> = ({
   coords,
   filters,
   onToggleFilter,
-  isSimulating,
+  destination,
+  onSelectDestination,
+  onClearDestination,
 }) => {
+  const [searchText, setSearchText] = useState('');
+
+  // 검색창 입력 후 엔터 쳤을 때
+  const handleSearchSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!searchText.trim()) return;
+
+    // 현재 위치 기준 북동쪽 약 600m 지점에 목적지 생성 (실제 API 검색 전 모의 검색)
+    onSelectDestination({
+      name: searchText,
+      latitude: coords.latitude + 0.0035,
+      longitude: coords.longitude + 0.0025,
+    });
+    setSearchText('');
+  };
+
+  // 네이버 지도 스타일 원클릭 간편 목적지
+  const handleQuickDestination = (title: string, deltaLat: number, deltaLng: number) => {
+    onSelectDestination({
+      name: title,
+      latitude: coords.latitude + deltaLat,
+      longitude: coords.longitude + deltaLng,
+    });
+  };
+
   return (
-    <header className="safe-header">
-      <div className="header-top">
-        <div className="title-area">
-          <div className="logo-badge">
-            <ShieldCheck size={20} color="#10B981" />
-            <span className="app-title">안심 귀가 내비</span>
-          </div>
-          <span className="gps-status">
-            {isSimulating ? '🎮 가상 보행 모드' : `📍 ${coords.latitude.toFixed(4)}, ${coords.longitude.toFixed(4)}`}
+    <header className="naver-style-header">
+      {/* 1. 네이버 지도 스타일 플로팅 검색창 */}
+      <form className="naver-search-box" onSubmit={handleSearchSubmit}>
+        <Search size={18} className="search-icon" />
+        <input
+          type="text"
+          className="search-input"
+          placeholder={destination ? `목적지: ${destination.name}` : "어디로 갈까요? (지도를 터치해도 됩니다)"}
+          value={searchText}
+          onChange={(e) => setSearchText(e.target.value)}
+        />
+        {destination ? (
+          <button type="button" className="clear-dest-btn" onClick={onClearDestination} title="목적지 취소">
+            <X size={16} />
+          </button>
+        ) : (
+          <span className="search-hint">
+            <MapPin size={14} />
           </span>
-        </div>
+        )}
+      </form>
 
-        <div className="safety-badge">
-          <span className="pulse-dot"></span>
-          안심 방범 감시 중
-        </div>
-      </div>
+      {/* 2. 빠른 목적지 칩 & 방범 시설 필터 (네이버 지도 스타일) */}
+      <div className="quick-chips-scroll">
+        {!destination && (
+          <>
+            <button
+              className="quick-chip destination-chip"
+              onClick={() => handleQuickDestination('우리 집 🏠', 0.0032, 0.0022)}
+            >
+              🏠 우리 집
+            </button>
+            <button
+              className="quick-chip destination-chip"
+              onClick={() => handleQuickDestination('가까운 지하철역 🚇', 0.0025, -0.0018)}
+            >
+              🚇 지하철역
+            </button>
+            <button
+              className="quick-chip destination-chip"
+              onClick={() => handleQuickDestination('24시 편의점 🏪', 0.0015, 0.0012)}
+            >
+              🏪 편의점
+            </button>
+          </>
+        )}
 
-      {/* 방범 시설물 필터 태그 */}
-      <div className="filter-tags">
+        {/* 시설물 필터 */}
         <button
-          className={`filter-btn ${filters.cctv ? 'active cctv' : ''}`}
+          className={`quick-chip filter ${filters.cctv ? 'active cctv' : ''}`}
           onClick={() => onToggleFilter('cctv')}
         >
-          <Video size={14} /> CCTV
+          <Video size={13} /> CCTV
         </button>
         <button
-          className={`filter-btn ${filters.streetlight ? 'active light' : ''}`}
+          className={`quick-chip filter ${filters.streetlight ? 'active light' : ''}`}
           onClick={() => onToggleFilter('streetlight')}
         >
-          <Lightbulb size={14} /> 가로등
+          <Lightbulb size={13} /> 가로등
         </button>
         <button
-          className={`filter-btn ${filters.bell ? 'active bell' : ''}`}
+          className={`quick-chip filter ${filters.bell ? 'active bell' : ''}`}
           onClick={() => onToggleFilter('bell')}
         >
-          <BellRing size={14} /> 비상벨
+          <BellRing size={13} /> 비상벨
         </button>
       </div>
     </header>

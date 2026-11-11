@@ -5,14 +5,14 @@ import View from 'ol/View';
 import TileLayer from 'ol/layer/Tile';
 import XYZ from 'ol/source/XYZ';
 import OSM from 'ol/source/OSM';
-import { fromLonLat } from 'ol/proj';
+import { fromLonLat, toLonLat } from 'ol/proj';
 import Feature from 'ol/Feature';
 import Point from 'ol/geom/Point';
 import LineString from 'ol/geom/LineString';
 import VectorSource from 'ol/source/Vector';
 import VectorLayer from 'ol/layer/Vector';
 import { Style, Circle as CircleStyle, Fill, Stroke, Text } from 'ol/style';
-import { LocationCoords, SafetyFacility, MapFilterState, RouteType } from '../types';
+import { LocationCoords, SafetyFacility, MapFilterState, RouteType, DestinationPoint } from '../types';
 
 interface SafeMapProps {
   currentCoords: LocationCoords;
@@ -20,7 +20,9 @@ interface SafeMapProps {
   filters: MapFilterState;
   showRoutes: boolean;
   selectedRouteType: RouteType;
+  destination: DestinationPoint | null;
   onFacilityClick?: (facility: SafetyFacility) => void;
+  onMapClickToSetDestination?: (coords: { latitude: number; longitude: number }) => void;
 }
 
 export const SafeMap: React.FC<SafeMapProps> = ({
@@ -29,7 +31,9 @@ export const SafeMap: React.FC<SafeMapProps> = ({
   filters,
   showRoutes,
   selectedRouteType,
+  destination,
   onFacilityClick,
+  onMapClickToSetDestination,
 }) => {
   const mapElement = useRef<HTMLDivElement>(null);
   const mapRef = useRef<Map | null>(null);
@@ -83,14 +87,25 @@ export const SafeMap: React.FC<SafeMapProps> = ({
       controls: [], // 모바일 풀스크린 깔끔한 뷰를 위해 기본 컨트롤 숨김
     });
 
-    // 마커 클릭 이벤트
+    // 지도 클릭 이벤트 (시설물 클릭 또는 목적지 지정)
     map.on('click', (evt) => {
+      let clickedFacility = false;
       map.forEachFeatureAtPixel(evt.pixel, (feature) => {
         const facilityData = feature.get('facilityData') as SafetyFacility;
         if (facilityData && onFacilityClick) {
           onFacilityClick(facilityData);
+          clickedFacility = true;
         }
       });
+
+      // 시설물 클릭이 아니라 빈 지도 공간을 터치한 경우 -> 해당 지점을 새로운 목적지로 지정!
+      if (!clickedFacility && onMapClickToSetDestination) {
+        const lonLat = toLonLat(evt.coordinate);
+        onMapClickToSetDestination({
+          longitude: lonLat[0],
+          latitude: lonLat[1],
+        });
+      }
     });
 
     mapRef.current = map;
@@ -119,7 +134,7 @@ export const SafeMap: React.FC<SafeMapProps> = ({
       })
     );
 
-    // 내부 중심 점
+    // 내부 중심 점 (파란 내 위치)
     const centerDot = new Feature(new Point(userCoord));
     centerDot.setStyle(
       new Style({
@@ -132,11 +147,6 @@ export const SafeMap: React.FC<SafeMapProps> = ({
     );
 
     userSourceRef.current.addFeatures([pulseFeature, centerDot]);
-
-    mapRef.current.getView().animate({
-      center: userCoord,
-      duration: 600,
-    });
   }, [currentCoords]);
 
   // 3. 방범 시설물(CCTV, 가로등, 비상벨) 마커 렌더링
@@ -184,48 +194,52 @@ export const SafeMap: React.FC<SafeMapProps> = ({
     });
   }, [facilities, filters]);
 
-  // 4. 안심 대안 경로 vs 최단 지름길 경로 동시 렌더링 & 선택 강조
+  // 4. 사용자가 지정한 목적지 기반 듀얼 경로 렌더링
   useEffect(() => {
     routeSourceRef.current.clear();
-    if (!showRoutes || !currentCoords) return;
+
+    // 목적지가 아직 없거나 경로 숨김 모드일 때는 경로를 그리지 않음
+    if (!destination || !showRoutes || !currentCoords) return;
 
     const startLng = currentCoords.longitude;
     const startLat = currentCoords.latitude;
-    const destCoord = fromLonLat([startLng + 0.0035, startLat + 0.0020]);
+    const destLng = destination.longitude;
+    const destLat = destination.latitude;
 
-    // 1) 안심 우회 경로 (CCTV, 가로등이 많은 큰길 경유)
-    const safePathCoords = [
-      fromLonLat([startLng, startLat]),
-      fromLonLat([startLng + 0.0012, startLat + 0.0008]),
-      fromLonLat([startLng + 0.0025, startLat + 0.0014]),
-      destCoord,
-    ];
+    const destCoord = fromLonLat([destLng, destLat]);
 
-    const isSafeSelected = selectedRouteType === 'safe';
-
-    const safeRouteFeature = new Feature({
-      geometry: new LineString(safePathCoords),
-      routeType: 'safe',
+    // 1) 목적지 깃발 마커
+    const destFeature = new Feature({
+      geometry: new Point(destCoord),
     });
-    safeRouteFeature.setStyle(
+    destFeature.setStyle(
       new Style({
-        stroke: new Stroke({
-          color: isSafeSelected ? '#10B981' : 'rgba(16, 185, 129, 0.4)',
-          width: isSafeSelected ? 7 : 4,
-          lineCap: 'round',
+        image: new CircleStyle({
+          radius: 10,
+          fill: new Fill({ color: '#EF4444' }),
+          stroke: new Stroke({ color: '#FFFFFF', width: 2.5 }),
+        }),
+        text: new Text({
+          text: '📍 ' + destination.name,
+          font: 'bold 12px sans-serif',
+          offsetY: -18,
+          fill: new Fill({ color: '#FFFFFF' }),
+          stroke: new Stroke({ color: '#0F172A', width: 3 }),
         }),
       })
     );
 
-    // 2) 최단 지름길 경로 (어둡고 CCTV 사각지대 골목길 통과)
+    // 2) 최단 지름길 (직선에 가까운 최단 관통 경로)
+    const midLng = (startLng + destLng) / 2;
+    const midLat = (startLat + destLat) / 2;
+
     const shortestPathCoords = [
       fromLonLat([startLng, startLat]),
-      fromLonLat([startLng + 0.0015, startLat + 0.0003]),
+      fromLonLat([midLng + (destLng - startLng) * 0.1, midLat - (destLat - startLat) * 0.1]),
       destCoord,
     ];
 
     const isShortestSelected = selectedRouteType === 'shortest';
-
     const shortestRouteFeature = new Feature({
       geometry: new LineString(shortestPathCoords),
       routeType: 'shortest',
@@ -241,32 +255,35 @@ export const SafeMap: React.FC<SafeMapProps> = ({
       })
     );
 
-    // 3) 목적지 도착 깃발 마커
-    const destFeature = new Feature({
-      geometry: new Point(destCoord),
+    // 3) 안심 우회 경로 (CCTV, 가로등이 많은 대로변으로 살짝 우회)
+    const safePathCoords = [
+      fromLonLat([startLng, startLat]),
+      fromLonLat([startLng + (destLng - startLng) * 0.35, startLat + (destLat - startLat) * 0.1]),
+      fromLonLat([startLng + (destLng - startLng) * 0.65, startLat + (destLat - startLat) * 0.9]),
+      destCoord,
+    ];
+
+    const isSafeSelected = selectedRouteType === 'safe';
+    const safeRouteFeature = new Feature({
+      geometry: new LineString(safePathCoords),
+      routeType: 'safe',
     });
-    destFeature.setStyle(
+    safeRouteFeature.setStyle(
       new Style({
-        image: new CircleStyle({
-          radius: 9,
-          fill: new Fill({ color: '#8B5CF6' }),
-          stroke: new Stroke({ color: '#FFFFFF', width: 2.5 }),
-        }),
-        text: new Text({
-          text: '🏁',
-          font: '13px sans-serif',
-          offsetY: -15,
+        stroke: new Stroke({
+          color: isSafeSelected ? '#10B981' : 'rgba(16, 185, 129, 0.4)',
+          width: isSafeSelected ? 7 : 4,
+          lineCap: 'round',
         }),
       })
     );
 
-    // 선택되지 않은 경로를 먼저 깔고, 선택된 경로를 위에 표시
     if (isSafeSelected) {
       routeSourceRef.current.addFeatures([shortestRouteFeature, safeRouteFeature, destFeature]);
     } else {
       routeSourceRef.current.addFeatures([safeRouteFeature, shortestRouteFeature, destFeature]);
     }
-  }, [showRoutes, selectedRouteType, currentCoords]);
+  }, [destination, showRoutes, selectedRouteType, currentCoords]);
 
   return (
     <div
