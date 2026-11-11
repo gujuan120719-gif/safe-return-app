@@ -9,7 +9,6 @@ import {
   X,
   Navigation,
   MapPin,
-  ChevronRight,
 } from 'lucide-react';
 
 interface ControlPanelProps {

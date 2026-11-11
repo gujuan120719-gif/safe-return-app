@@ -34,6 +34,20 @@ export interface DestinationPoint {
 
 export type RouteType = 'safe' | 'shortest';
 
+export interface RouteOption {
+  id: RouteType;
+  title: string;
+  badge: string;
+  isSafePriority: boolean;
+  distanceMeter: number;
+  durationMinutes: number;
+  safetyScore: number;
+  cctvCount: number;
+  lightCount: number;
+  dangerSectionCount: number;
+  description: string;
+}
+
 export interface DynamicRouteData {
   routeType: RouteType;
   title: string;
