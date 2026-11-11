@@ -6,18 +6,19 @@ import { useGeolocation } from './hooks/useGeolocation';
 import { useSafeAlert } from './hooks/useSafeAlert';
 import { fetchNearbyFacilities } from './services/supabase';
 import { SafetyFacility, MapFilterState, RouteType, DestinationPoint } from './types';
+import { AlertCircle } from 'lucide-react';
 
 export default function App() {
-  const { coords, isSimulating, simulateStep, resetToGPS } = useGeolocation();
-  const { alertDangerZone, triggerVibration } = useSafeAlert();
+  const { coords, resetToGPS } = useGeolocation();
+  const { isAlertActive, alertMessage, alertDangerZone, triggerVibration } = useSafeAlert();
 
   const [facilities, setFacilities] = useState<SafetyFacility[]>([]);
   const [selectedFacility, setSelectedFacility] = useState<SafetyFacility | null>(null);
 
-  // 목적지 상태: 기본값을 null로 설정하여 앱 시작 시 목적지가 자동으로 강제 설정되지 않도록 변경!
+  // 목적지 상태 (초기값 null: 절대 임의의 목적지가 자동 설정되지 않음)
   const [destination, setDestination] = useState<DestinationPoint | null>(null);
 
-  // 듀얼 경로 상태 관리 (최단거리 vs 안심길)
+  // 듀얼 경로 선택
   const [showRoutes, setShowRoutes] = useState(true);
   const [selectedRouteType, setSelectedRouteType] = useState<RouteType>('safe');
 
@@ -30,7 +31,7 @@ export default function App() {
   // GPS 좌표 변경 시 주변 안전 시설물 데이터 갱신
   useEffect(() => {
     let isMounted = true;
-    fetchNearbyFacilities(coords.latitude, coords.longitude, 1200).then((data) => {
+    fetchNearbyFacilities(coords.latitude, coords.longitude, 1500).then((data) => {
       if (isMounted) {
         setFacilities(data);
       }
@@ -40,44 +41,45 @@ export default function App() {
     };
   }, [coords.latitude, coords.longitude]);
 
-  // 지도 빈 곳을 터치했을 때 해당 지점을 목적지로 설정
+  // 지도 빈 곳 터치 시 목적지 즉시 지정
   const handleMapClickToSetDestination = (clickCoords: { latitude: number; longitude: number }) => {
     setDestination({
-      name: '지도에서 찍은 목적지 📍',
+      name: '지정 위치 📍',
       latitude: clickCoords.latitude,
       longitude: clickCoords.longitude,
     });
-    triggerVibration('safe'); // 목적지 찍힘 피드백 진동
+    triggerVibration('safe');
   };
 
-  // 경로 선택 변경 핸들러 (음성은 빼고 햅틱 진동 피드백만 제공)
   const handleSelectRouteType = (type: RouteType) => {
     setSelectedRouteType(type);
-    if (type === 'safe') {
-      triggerVibration('safe'); // 부드러운 1회 햅틱
-    } else {
-      triggerVibration('caution'); // 2회 주의 진동
-    }
+    triggerVibration(type === 'safe' ? 'safe' : 'caution');
   };
 
-  // 필터 토글
   const handleToggleFilter = (type: keyof MapFilterState) => {
     setFilters((prev) => ({ ...prev, [type]: !prev[type] }));
   };
 
-  // 위험 구간 진입 강제 테스트 (강력한 3단 위험 진동만 출력)
-  const handleTriggerDangerAlert = () => {
-    alertDangerZone();
-  };
-
-  // 골목길 진입 가상 시뮬레이션
-  const handleStepForward = () => {
-    simulateStep(0.0004, 0.0003);
+  const facilityCounts = {
+    cctv: facilities.filter((f) => f.type === 'CCTV').length,
+    light: facilities.filter((f) => f.type === 'STREETLIGHT').length,
+    bell: facilities.filter((f) => f.type === 'BELL').length,
   };
 
   return (
-    <div className="app-container">
-      {/* 1. 네이버 지도 스타일 상단 플로팅 검색바 & 필터 */}
+    <div className={`naver-app-container ${isAlertActive ? 'danger-screen-alert' : ''}`}>
+      {/* 1. 위험 감지 시 나타나는 상단 경고 팝업 토스트 */}
+      {isAlertActive && (
+        <div className="danger-toast-banner">
+          <AlertCircle size={20} color="#FFFFFF" />
+          <div className="danger-toast-text">
+            <strong>위험 구간 감지</strong>
+            <p>{alertMessage || '어두운 골목길에 진입했습니다. 진동 경고 발동!'}</p>
+          </div>
+        </div>
+      )}
+
+      {/* 2. 네이버 지도 화이트 헤더 & 검색바 */}
       <SafeHeader
         coords={coords}
         filters={filters}
@@ -88,9 +90,10 @@ export default function App() {
           triggerVibration('safe');
         }}
         onClearDestination={() => setDestination(null)}
+        facilityCounts={facilityCounts}
       />
 
-      {/* 2. 브이월드 2D 메인 지도 & 터치 목적지 지정 */}
+      {/* 3. 브이월드 2D 메인 지도 & 터치 핀 */}
       <SafeMap
         currentCoords={coords}
         facilities={facilities}
@@ -102,8 +105,9 @@ export default function App() {
         onMapClickToSetDestination={handleMapClickToSetDestination}
       />
 
-      {/* 3. 하단 네이버 지도 스타일 안내 & 듀얼 경로 비교 패널 */}
+      {/* 4. 네이버 지도 스타일 하단 바텀시트 */}
       <ControlPanel
+        startCoords={coords}
         destination={destination}
         onClearDestination={() => setDestination(null)}
         selectedFacility={selectedFacility}
@@ -112,11 +116,8 @@ export default function App() {
         onToggleRoutes={() => setShowRoutes((prev) => !prev)}
         selectedRouteType={selectedRouteType}
         onSelectRouteType={handleSelectRouteType}
-        onTriggerDangerAlert={handleTriggerDangerAlert}
-        onStepForward={handleStepForward}
-        onResetGPS={resetToGPS}
-        isSimulating={isSimulating}
-        facilityCount={facilities.length}
+        onTriggerDangerAlert={alertDangerZone}
+        facilities={facilities}
       />
     </div>
   );

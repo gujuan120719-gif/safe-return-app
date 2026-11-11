@@ -26,23 +26,23 @@ export interface MapFilterState {
 }
 
 export interface DestinationPoint {
+  name: string;
   latitude: number;
   longitude: number;
-  name: string;
+  address?: string;
 }
 
 export type RouteType = 'safe' | 'shortest';
 
-export interface RouteOption {
-  id: RouteType;
+export interface DynamicRouteData {
+  routeType: RouteType;
   title: string;
-  badge: string;
-  isSafePriority: boolean;
-  distanceMeter: number;
+  distanceMeters: number;
+  distanceText: string;
   durationMinutes: number;
-  safetyScore: number; // 0 ~ 100
+  durationText: string;
+  safetyScore: number;
   cctvCount: number;
   lightCount: number;
-  dangerSectionCount: number;
-  description: string;
+  dangerNote: string;
 }
