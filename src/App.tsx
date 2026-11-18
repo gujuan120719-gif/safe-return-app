@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { SafeMap } from './components/SafeMap';
 import { SafeHeader } from './components/SafeHeader';
 import { ControlPanel } from './components/ControlPanel';
+import { NavigationHUD } from './components/NavigationHUD';
 import { useGeolocation } from './hooks/useGeolocation';
 import { useSafeAlert } from './hooks/useSafeAlert';
 import { fetchNearbyFacilities } from './services/supabase';
@@ -22,6 +23,9 @@ export default function App() {
   // 실제 도로망 라우팅 데이터 및 로딩 상태
   const [routeData, setRouteData] = useState<DualRouteResult | null>(null);
   const [isLoadingRoute, setIsLoadingRoute] = useState(false);
+
+  // 실시간 보행 내비게이션 주행 모드
+  const [isNavigating, setIsNavigating] = useState(false);
 
   // 듀얼 경로 선택 (기본: 안심 우회로)
   const [showRoutes, setShowRoutes] = useState(true);
@@ -112,22 +116,25 @@ export default function App() {
         </div>
       )}
 
-      {/* 2. 오리지널 클린 화이트 헤더 & 장소 검색바 */}
-      <SafeHeader
-        coords={coords}
-        filters={filters}
-        onToggleFilter={handleToggleFilter}
-        destination={destination}
-        onSelectDestination={(dest) => {
-          setDestination(dest);
-          triggerVibration('safe');
-        }}
-        onClearDestination={() => {
-          setDestination(null);
-          setRouteData(null);
-        }}
-        facilityCounts={facilityCounts}
-      />
+      {/* 2. 오리지널 클린 화이트 헤더 & 장소 검색바 (내비게이션 주행 중에는 HUD에 집중하도록 숨김) */}
+      {!isNavigating && (
+        <SafeHeader
+          coords={coords}
+          filters={filters}
+          onToggleFilter={handleToggleFilter}
+          destination={destination}
+          onSelectDestination={(dest) => {
+            setDestination(dest);
+            triggerVibration('safe');
+          }}
+          onClearDestination={() => {
+            setDestination(null);
+            setRouteData(null);
+            setIsNavigating(false);
+          }}
+          facilityCounts={facilityCounts}
+        />
+      )}
 
       {/* 3. 브이월드 2D 메인 지도 & 실제 도로망 궤적 렌더링 */}
       <SafeMap
@@ -140,26 +147,47 @@ export default function App() {
         destination={destination}
         routeData={routeData}
         isLoadingRoute={isLoadingRoute}
+        isNavigating={isNavigating}
         onFacilityClick={(facility) => setSelectedFacility(facility)}
-        onMapClickToSetDestination={handleMapClickToSetDestination}
+        onMapClickToSetDestination={(coords) => {
+          if (!isNavigating) {
+            handleMapClickToSetDestination(coords);
+          }
+        }}
       />
 
-      {/* 4. 하단 실제 도로망 길찾기 바텀시트 */}
-      <ControlPanel
-        startCoords={coords}
-        destination={destination}
-        onClearDestination={() => {
-          setDestination(null);
-          setRouteData(null);
-        }}
-        selectedFacility={selectedFacility}
-        onCloseFacility={() => setSelectedFacility(null)}
-        selectedRouteType={selectedRouteType}
-        onSelectRouteType={handleSelectRouteType}
-        onTriggerDangerAlert={alertDangerZone}
-        routeData={routeData}
-        isLoadingRoute={isLoadingRoute}
-      />
+      {/* 4. 실시간 보행 내비게이션 주행 모드 (HUD) */}
+      {isNavigating && routeData && destination ? (
+        <NavigationHUD
+          route={selectedRouteType === 'safe' ? routeData.safeRoute : routeData.shortestRoute}
+          routeType={selectedRouteType}
+          currentCoords={coords}
+          destinationName={destination.name}
+          onExitNavigation={() => setIsNavigating(false)}
+        />
+      ) : (
+        /* 5. 하단 실제 도로망 길찾기 바텀시트 */
+        <ControlPanel
+          startCoords={coords}
+          destination={destination}
+          onClearDestination={() => {
+            setDestination(null);
+            setRouteData(null);
+            setIsNavigating(false);
+          }}
+          selectedFacility={selectedFacility}
+          onCloseFacility={() => setSelectedFacility(null)}
+          selectedRouteType={selectedRouteType}
+          onSelectRouteType={handleSelectRouteType}
+          onTriggerDangerAlert={alertDangerZone}
+          onStartNavigation={() => {
+            setIsNavigating(true);
+            triggerVibration('safe');
+          }}
+          routeData={routeData}
+          isLoadingRoute={isLoadingRoute}
+        />
+      )}
     </div>
   );
 }

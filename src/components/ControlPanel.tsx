@@ -22,6 +22,7 @@ interface ControlPanelProps {
   selectedRouteType: RouteType;
   onSelectRouteType: (type: RouteType) => void;
   onTriggerDangerAlert: () => void;
+  onStartNavigation: () => void;
   routeData: DualRouteResult | null;
   isLoadingRoute: boolean;
 }
@@ -34,6 +35,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
   selectedRouteType,
   onSelectRouteType,
   onTriggerDangerAlert,
+  onStartNavigation,
   routeData,
   isLoadingRoute,
 }) => {
@@ -181,11 +183,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
             <div className="drawer-bottom-actions">
               <button
                 className="btn-start-navigation"
-                onClick={() => {
-                  const currentMode = selectedRouteType === 'safe' ? '안심 우회로' : '최단 지름길';
-                  const time = selectedRouteType === 'safe' ? routeData.safeRoute.durationMinutes : routeData.shortestRoute.durationMinutes;
-                  alert(`보행 안내를 시작합니다.\n[${currentMode}] 예상 소요시간: 약 ${time}분`);
-                }}
+                onClick={onStartNavigation}
               >
                 <Navigation size={16} />
                 <span>

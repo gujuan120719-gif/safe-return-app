@@ -26,6 +26,7 @@ interface SafeMapProps {
   destination: DestinationPoint | null;
   routeData: DualRouteResult | null;
   isLoadingRoute: boolean;
+  isNavigating?: boolean;
   onFacilityClick?: (facility: SafetyFacility) => void;
   onMapClickToSetDestination?: (coords: { latitude: number; longitude: number }) => void;
 }
@@ -40,6 +41,7 @@ export const SafeMap: React.FC<SafeMapProps> = ({
   destination,
   routeData,
   isLoadingRoute,
+  isNavigating = false,
   onFacilityClick,
   onMapClickToSetDestination,
 }) => {
@@ -154,8 +156,15 @@ export const SafeMap: React.FC<SafeMapProps> = ({
 
     userSourceRef.current.addFeatures([pulseFeature, centerDot]);
 
-    // 첫 실제 GPS 감지 시 또는 사용자가 다른 지역에 있을 때 지도를 해당 지역으로 자동 이동!
-    if (hasRealGps && !isFirstGpsCenteredRef.current) {
+    // 내비게이션 주행 중일 때는 17레벨로 줌인하여 사용자 위치를 계속 추적
+    if (isNavigating && mapRef.current) {
+      mapRef.current.getView().animate({
+        center: userCoord,
+        zoom: 17,
+        duration: 400,
+      });
+    } else if (hasRealGps && !isFirstGpsCenteredRef.current) {
+      // 첫 실제 GPS 감지 시 또는 사용자가 다른 지역에 있을 때 지도를 해당 지역으로 자동 이동!
       isFirstGpsCenteredRef.current = true;
       mapRef.current.getView().animate({
         center: userCoord,
@@ -163,7 +172,7 @@ export const SafeMap: React.FC<SafeMapProps> = ({
         duration: 800,
       });
     }
-  }, [currentCoords, hasRealGps]);
+  }, [currentCoords, hasRealGps, isNavigating]);
 
   // 3. 방범 시설물 마커 렌더링 (CCTV / 가로등 / 비상벨)
   useEffect(() => {
