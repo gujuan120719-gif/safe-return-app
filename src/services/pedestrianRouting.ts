@@ -95,10 +95,10 @@ async function fetchPedestrianCandidates(
 ): Promise<WalkableRouteData[]> {
   const routes: WalkableRouteData[] = [];
 
-  // 1) 기본 최단 보행 경로 (인도 및 보행로 전용)
+  // 1) 공식 FOSSGIS 보행 전용 엔진(routed-foot: 차도/고속도로가 그래프 상에 아예 존재하지 않음) 1순위 질의
   try {
-    const url = `https://router.project-osrm.org/route/v1/foot/${startLng},${startLat};${destLng},${destLat}?overview=full&geometries=geojson&steps=true&alternatives=true`;
-    const res = await fetchWithTimeout(url, 3500);
+    const footUrl = `https://routing.openstreetmap.de/routed-foot/route/v1/driving/${startLng},${startLat};${destLng},${destLat}?overview=full&geometries=geojson&steps=true&alternatives=true`;
+    const res = await fetchWithTimeout(footUrl, 3000);
 
     if (res && res.ok) {
       const data = await res.json();
@@ -110,7 +110,27 @@ async function fetchPedestrianCandidates(
       }
     }
   } catch (e) {
-    console.warn('보행 라우팅 1차 엔진 호출 실패:', e);
+    console.warn('FOSSGIS 보행 라우팅 시도 실패, OSRM 대체 시도:', e);
+  }
+
+  // 2) OSRM 보행 엔진 2순위 질의 (후보군 보강)
+  if (routes.length === 0) {
+    try {
+      const url = `https://router.project-osrm.org/route/v1/foot/${startLng},${startLat};${destLng},${destLat}?overview=full&geometries=geojson&steps=true&alternatives=true`;
+      const res = await fetchWithTimeout(url, 3000);
+
+      if (res && res.ok) {
+        const data = await res.json();
+        if (data.code === 'Ok' && data.routes) {
+          for (const r of data.routes) {
+            const parsed = parseRouteStepsAndScore(r, facilities);
+            if (parsed) routes.push(parsed);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('OSRM 보행 라우팅 시도 실패:', e);
+    }
   }
 
   // 2) 방범 시설물(CCTV/가로등) 밀집 지점을 경유하는 안심 보행 경로 추가 탐색

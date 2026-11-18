@@ -18,6 +18,7 @@ import { LocateFixed, Plus, Minus } from 'lucide-react';
 
 interface SafeMapProps {
   currentCoords: LocationCoords;
+  hasRealGps: boolean;
   facilities: SafetyFacility[];
   filters: MapFilterState;
   showRoutes: boolean;
@@ -31,6 +32,7 @@ interface SafeMapProps {
 
 export const SafeMap: React.FC<SafeMapProps> = ({
   currentCoords,
+  hasRealGps,
   facilities,
   filters,
   showRoutes,
@@ -47,11 +49,12 @@ export const SafeMap: React.FC<SafeMapProps> = ({
   const userSourceRef = useRef<VectorSource>(new VectorSource());
   const facilitySourceRef = useRef<VectorSource>(new VectorSource());
   const routeSourceRef = useRef<VectorSource>(new VectorSource());
+  const isFirstGpsCenteredRef = useRef(false);
 
-  // VITE_VWORLD_API_KEY 또는 VITEVWORLDAPIKEY 둘 중 어떤 이름으로 등록해도 모두 자동 인식
+  // 브이월드 키 자동 인식 (언더바 여부 상관없이 모두 지원)
   const vworldKey = import.meta.env.VITE_VWORLD_API_KEY || (import.meta.env as any).VITEVWORLDAPIKEY;
 
-  // 1. 지도 초기화
+  // 1. 지도 인스턴스 초기화
   useEffect(() => {
     if (!mapElement.current) return;
 
@@ -88,12 +91,12 @@ export const SafeMap: React.FC<SafeMapProps> = ({
         center: initialCenter,
         zoom: 16,
         maxZoom: 19,
-        minZoom: 11,
+        minZoom: 10,
       }),
-      controls: [], // 오리지널 커스텀 플로팅 버튼 사용
+      controls: [],
     });
 
-    // 모바일 터치 오작동을 줄이기 위해 singleclick 이벤트 사용
+    // 지도 터치 시 해당 좌표를 목적지로 지정
     map.on('singleclick', (evt) => {
       let clickedFacility = false;
       map.forEachFeatureAtPixel(evt.pixel, (feature) => {
@@ -104,7 +107,6 @@ export const SafeMap: React.FC<SafeMapProps> = ({
         }
       });
 
-      // 시설물을 클릭한 것이 아닐 때 -> 터치한 좌표를 새로운 목적지로 지정
       if (!clickedFacility && onMapClickToSetDestination) {
         const lonLat = toLonLat(evt.coordinate);
         onMapClickToSetDestination({
@@ -121,7 +123,7 @@ export const SafeMap: React.FC<SafeMapProps> = ({
     };
   }, [vworldKey]);
 
-  // 2. 내 현재 위치 마커 (깔끔한 블루 펄스 링)
+  // 2. 실제 GPS 위치 획득 시: 서울에 멈춰있지 않고 사용자의 실제 위치로 즉시 자동 카메라 이동!
   useEffect(() => {
     if (!mapRef.current) return;
 
@@ -151,7 +153,17 @@ export const SafeMap: React.FC<SafeMapProps> = ({
     );
 
     userSourceRef.current.addFeatures([pulseFeature, centerDot]);
-  }, [currentCoords]);
+
+    // 첫 실제 GPS 감지 시 또는 사용자가 다른 지역에 있을 때 지도를 해당 지역으로 자동 이동!
+    if (hasRealGps && !isFirstGpsCenteredRef.current) {
+      isFirstGpsCenteredRef.current = true;
+      mapRef.current.getView().animate({
+        center: userCoord,
+        zoom: 16,
+        duration: 800,
+      });
+    }
+  }, [currentCoords, hasRealGps]);
 
   // 3. 방범 시설물 마커 렌더링 (CCTV / 가로등 / 비상벨)
   useEffect(() => {
@@ -198,7 +210,7 @@ export const SafeMap: React.FC<SafeMapProps> = ({
     });
   }, [facilities, filters]);
 
-  // 4. 실제 도로망(보행로)을 따라 꺾어지는 진짜 경로 렌더링
+  // 4. 보행자 전용 도로망 궤적 렌더링 (차도/고속도로 배제)
   useEffect(() => {
     routeSourceRef.current.clear();
 
@@ -206,7 +218,7 @@ export const SafeMap: React.FC<SafeMapProps> = ({
 
     const destCoord = fromLonLat([destination.longitude, destination.latitude]);
 
-    // 1) 목적지 오리지널 핀 마커
+    // 목적지 핀 마커
     const destFeature = new Feature({
       geometry: new Point(destCoord),
     });
@@ -227,11 +239,10 @@ export const SafeMap: React.FC<SafeMapProps> = ({
       })
     );
 
-    // 2) 실제 도로망 궤적이 준비되었을 때 도로선을 따라 그리기
     if (routeData) {
       const isSafeSelected = selectedRouteType === 'safe';
 
-      // 최단 지름길 (실제 도로 보행 궤적)
+      // 1) 최단 지름길 (보행자 골목길)
       const shortestCoords = routeData.shortestRoute.coordinates.map((c) => fromLonLat(c));
       const shortestRouteFeature = new Feature({
         geometry: new LineString(shortestCoords),
@@ -247,7 +258,7 @@ export const SafeMap: React.FC<SafeMapProps> = ({
         })
       );
 
-      // 안심 우회로 (안전시설물 밀집 및 큰길 위주 실제 도로 궤적)
+      // 2) 안심 우회로 (가로등/CCTV 밀집 보행로)
       const safeCoords = routeData.safeRoute.coordinates.map((c) => fromLonLat(c));
       const safeRouteFeature = new Feature({
         geometry: new LineString(safeCoords),
@@ -268,30 +279,29 @@ export const SafeMap: React.FC<SafeMapProps> = ({
         routeSourceRef.current.addFeatures([safeRouteFeature, shortestRouteFeature, destFeature]);
       }
 
-      // 화면에 출발지와 목적지 경로 전체가 예쁘게 들어오도록 자동 줌 맞춤
+      // 화면에 출발지와 목적지 전체가 적절히 들어오도록 자동 줌
       if (mapRef.current) {
         const extent = routeSourceRef.current.getExtent();
         if (extent && isFinite(extent[0])) {
           mapRef.current.getView().fit(extent, {
-            padding: [90, 40, 200, 40],
-            duration: 600,
+            padding: [90, 40, 220, 40],
+            duration: 500,
             maxZoom: 17,
           });
         }
       }
     } else {
-      // 로딩 중일 때는 목적지 핀만 먼저 표시
       routeSourceRef.current.addFeature(destFeature);
     }
   }, [destination, routeData, showRoutes, selectedRouteType, currentCoords]);
 
-  // 플로팅 컨트롤
+  // 플로팅 내 위치 바로가기
   const handleRecenter = () => {
     if (!mapRef.current) return;
     mapRef.current.getView().animate({
       center: fromLonLat([currentCoords.longitude, currentCoords.latitude]),
-      zoom: 17,
-      duration: 400,
+      zoom: 16,
+      duration: 500,
     });
   };
 
@@ -309,7 +319,7 @@ export const SafeMap: React.FC<SafeMapProps> = ({
     <div className="map-wrapper">
       <div ref={mapElement} className="ol-map-container" />
 
-      {/* 우측 플로팅 컨트롤 (현재 위치 & 줌) */}
+      {/* 우측 플로팅 컨트롤 */}
       <div className="original-map-controls">
         <button className="original-ctrl-btn" onClick={handleRecenter} title="내 위치로 이동">
           <LocateFixed size={18} color="#0F172A" />

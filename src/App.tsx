@@ -10,7 +10,7 @@ import { SafetyFacility, MapFilterState, RouteType, DestinationPoint } from './t
 import { AlertCircle } from 'lucide-react';
 
 export default function App() {
-  const { coords } = useGeolocation();
+  const { coords, hasRealGps } = useGeolocation();
   const { isAlertActive, alertMessage, alertDangerZone, triggerVibration } = useSafeAlert();
 
   const [facilities, setFacilities] = useState<SafetyFacility[]>([]);
@@ -132,6 +132,7 @@ export default function App() {
       {/* 3. 브이월드 2D 메인 지도 & 실제 도로망 궤적 렌더링 */}
       <SafeMap
         currentCoords={coords}
+        hasRealGps={hasRealGps}
         facilities={facilities}
         filters={filters}
         showRoutes={showRoutes}

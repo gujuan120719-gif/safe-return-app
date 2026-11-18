@@ -12,20 +12,6 @@ interface SafeHeaderProps {
   facilityCounts: { cctv: number; light: number; bell: number };
 }
 
-// 대한민국 주요 랜드마크 기본 좌표 사전 (네트워크 장애 시 즉시 대응)
-const QUICK_LANDMARKS: Record<string, { lat: number; lng: number }> = {
-  '서울역': { lat: 37.5559, lng: 126.9723 },
-  '시청역': { lat: 37.5657, lng: 126.9769 },
-  '광화문': { lat: 37.5759, lng: 126.9768 },
-  '명동역': { lat: 37.5609, lng: 126.9863 },
-  '을지로입구역': { lat: 37.5660, lng: 126.9826 },
-  '종각역': { lat: 37.5701, lng: 126.9829 },
-  '강남역': { lat: 37.4979, lng: 127.0276 },
-  '홍대입구역': { lat: 37.5575, lng: 126.9244 },
-  '수원역': { lat: 37.2657, lng: 127.0000 },
-  '부산역': { lat: 35.1152, lng: 129.0422 },
-};
-
 export const SafeHeader: React.FC<SafeHeaderProps> = ({
   coords,
   filters,
@@ -38,7 +24,7 @@ export const SafeHeader: React.FC<SafeHeaderProps> = ({
   const [searchText, setSearchText] = useState('');
   const [isSearching, setIsSearching] = useState(false);
 
-  // 검색창 입력 시 실제 오픈스트리트맵 한국 지오코더를 호출하여 실제 좌표를 검색합니다.
+  // 전국 단위 실시간 장소 검색 (오픈스트리트맵 한국 지오코더를 통해 전국 어디든 주소/장소 좌표 탐색)
   const handleSearchSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const query = searchText.trim();
@@ -47,20 +33,6 @@ export const SafeHeader: React.FC<SafeHeaderProps> = ({
     setIsSearching(true);
 
     try {
-      // 1. 빠른 랜드마크 사전 확인
-      const matchedKey = Object.keys(QUICK_LANDMARKS).find((k) => query.includes(k));
-      if (matchedKey) {
-        onSelectDestination({
-          name: matchedKey,
-          latitude: QUICK_LANDMARKS[matchedKey].lat,
-          longitude: QUICK_LANDMARKS[matchedKey].lng,
-        });
-        setSearchText('');
-        setIsSearching(false);
-        return;
-      }
-
-      // 2. OpenStreetMap 한국 공개 주소/장소 검색 API 호출
       const res = await fetch(
         `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&countrycodes=kr&limit=1`,
         { headers: { 'Accept-Language': 'ko' } }
@@ -82,20 +54,20 @@ export const SafeHeader: React.FC<SafeHeaderProps> = ({
         }
       }
     } catch (err) {
-      console.warn('지오코딩 검색 오류, 상대 좌표로 안내:', err);
+      console.warn('전국 지오코딩 검색 오류, 상대 좌표로 안내:', err);
     }
 
-    // 3. 검색 결과가 없을 경우: 현재 위치에서 해당 방향으로 실제 목적지 생성
+    // 검색 결과가 없거나 통신 지연 시: 현재 사용자 위치 기준 도보 300m 지점으로 목적지 생성
     onSelectDestination({
       name: query,
-      latitude: coords.latitude + 0.0035,
-      longitude: coords.longitude + 0.003,
+      latitude: coords.latitude + 0.0025,
+      longitude: coords.longitude + 0.0020,
     });
     setSearchText('');
     setIsSearching(false);
   };
 
-  // 퀵 목적지 (우리 집, 지하철역, 편의점)
+  // 전국 어디서든 사용자의 '현재 위치'를 기준으로 생성되는 보행 간편 목적지
   const handleQuickDestination = (title: string, deltaLat: number, deltaLng: number) => {
     onSelectDestination({
       name: title,
