@@ -48,7 +48,8 @@ export const SafeMap: React.FC<SafeMapProps> = ({
   const facilitySourceRef = useRef<VectorSource>(new VectorSource());
   const routeSourceRef = useRef<VectorSource>(new VectorSource());
 
-  const vworldKey = import.meta.env.VITE_VWORLD_API_KEY;
+  // VITE_VWORLD_API_KEY 또는 VITEVWORLDAPIKEY 둘 중 어떤 이름으로 등록해도 모두 자동 인식
+  const vworldKey = import.meta.env.VITE_VWORLD_API_KEY || (import.meta.env as any).VITEVWORLDAPIKEY;
 
   // 1. 지도 초기화
   useEffect(() => {

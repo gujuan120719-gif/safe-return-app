@@ -89,12 +89,19 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
           <div className="route-header-bar">
             <div className="dest-meta-box">
               <span className="dest-badge-dot" />
-              <h3 className="dest-title-text">{destination.name}</h3>
-              {routeData && (
-                <span className="dest-distance-text">
-                  {formatDistance(routeData.shortestRoute.distanceMeters)}
-                </span>
-              )}
+              <div>
+                <div className="dest-title-row">
+                  <h3 className="dest-title-text">{destination.name}</h3>
+                  {routeData && (
+                    <span className="dest-distance-text">
+                      {formatDistance(routeData.shortestRoute.distanceMeters)}
+                    </span>
+                  )}
+                </div>
+                <div className="pedestrian-safe-badge">
+                  <span>🚶 보행 전용로·골목길 100% (차도·고속도로 원천 차단)</span>
+                </div>
+              </div>
             </div>
             <button className="btn-cancel-route" onClick={onClearDestination}>
               안내 취소
