@@ -80,10 +80,11 @@ function generateDynamicLocalFacilities(lat: number, lng: number): SafetyFacilit
 export async function fetchNearbyFacilities(
   latitude: number,
   longitude: number,
-  radiusMeters: number = 1500
+  radiusMeters: number = 2000
 ): Promise<SafetyFacility[]> {
   if (supabase) {
     try {
+      // 1. RPC 함수(get_facilities_within_radius) 우선 호출
       const { data, error } = await supabase.rpc('get_facilities_within_radius', {
         user_lat: latitude,
         user_lng: longitude,
@@ -94,29 +95,28 @@ export async function fetchNearbyFacilities(
         return data as SafetyFacility[];
       }
 
-      // 테이블 직접 쿼리
+      // 2. RPC가 없거나 실패 시: Bounding Box 공간 인덱스 직렬 쿼리 (전국 8만건 데이터 즉시 대응)
+      const latDelta = (radiusMeters / 1000) / 111.0;
+      const cosLat = Math.cos((latitude * Math.PI) / 180);
+      const lngDelta = (radiusMeters / 1000) / (111.0 * (cosLat > 0.1 ? cosLat : 0.8));
+
       const { data: tableData, error: tableError } = await supabase
         .from('safety_facilities')
         .select('*')
-        .limit(100);
+        .gte('latitude', latitude - latDelta)
+        .lte('latitude', latitude + latDelta)
+        .gte('longitude', longitude - lngDelta)
+        .lte('longitude', longitude + lngDelta)
+        .limit(150);
 
       if (!tableError && tableData && tableData.length > 0) {
-        // 현재 위치와 가까운 것만 필터링
-        const filtered = (tableData as SafetyFacility[]).filter(f => {
-          const dLat = Math.abs(f.latitude - latitude);
-          const dLng = Math.abs(f.longitude - longitude);
-          return dLat < 0.02 && dLng < 0.02; // 약 2km 이내
-        });
-
-        if (filtered.length > 0) {
-          return filtered;
-        }
+        return tableData as SafetyFacility[];
       }
     } catch (err) {
       console.warn('Supabase 데이터 조회 오류:', err);
     }
   }
 
-  // 서울 고정이 아닌, 현재 접속한 사용자의 실제 위치 주변에 방범 시설물 자동 매핑
+  // 데이터가 아직 없는 외곽 산간 지역 등의 경우 사용자 위치 기반 안전 거점 제공
   return generateDynamicLocalFacilities(latitude, longitude);
 }

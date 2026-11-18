@@ -26,3 +26,8 @@ dist-ssr
 # Environment Variables
 .env
 .env.production
+
+# Data and temporary scripts
+*.csv
+scripts/*.js
+
