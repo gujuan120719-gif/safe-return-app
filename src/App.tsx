@@ -5,20 +5,25 @@ import { ControlPanel } from './components/ControlPanel';
 import { useGeolocation } from './hooks/useGeolocation';
 import { useSafeAlert } from './hooks/useSafeAlert';
 import { fetchNearbyFacilities } from './services/supabase';
+import { fetchRealRoadRoutes, DualRouteResult } from './services/pedestrianRouting';
 import { SafetyFacility, MapFilterState, RouteType, DestinationPoint } from './types';
 import { AlertCircle } from 'lucide-react';
 
 export default function App() {
-  const { coords, resetToGPS } = useGeolocation();
+  const { coords } = useGeolocation();
   const { isAlertActive, alertMessage, alertDangerZone, triggerVibration } = useSafeAlert();
 
   const [facilities, setFacilities] = useState<SafetyFacility[]>([]);
   const [selectedFacility, setSelectedFacility] = useState<SafetyFacility | null>(null);
 
-  // 목적지 상태 (초기값 null: 절대 임의의 목적지가 자동 설정되지 않음)
+  // 목적지 상태
   const [destination, setDestination] = useState<DestinationPoint | null>(null);
 
-  // 듀얼 경로 선택
+  // 실제 도로망 라우팅 데이터 및 로딩 상태
+  const [routeData, setRouteData] = useState<DualRouteResult | null>(null);
+  const [isLoadingRoute, setIsLoadingRoute] = useState(false);
+
+  // 듀얼 경로 선택 (기본: 안심 우회로)
   const [showRoutes, setShowRoutes] = useState(true);
   const [selectedRouteType, setSelectedRouteType] = useState<RouteType>('safe');
 
@@ -40,6 +45,34 @@ export default function App() {
       isMounted = false;
     };
   }, [coords.latitude, coords.longitude]);
+
+  // 목적지가 설정되거나 변경되면 실제 보행 도로망(OSRM) 경로를 비동기 호출
+  useEffect(() => {
+    if (!destination || !coords) {
+      setRouteData(null);
+      return;
+    }
+
+    let isCancelled = false;
+    setIsLoadingRoute(true);
+
+    fetchRealRoadRoutes(
+      coords.longitude,
+      coords.latitude,
+      destination.longitude,
+      destination.latitude,
+      facilities
+    ).then((result) => {
+      if (!isCancelled) {
+        setRouteData(result);
+        setIsLoadingRoute(false);
+      }
+    });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [destination, coords, facilities]);
 
   // 지도 빈 곳 터치 시 목적지 즉시 지정
   const handleMapClickToSetDestination = (clickCoords: { latitude: number; longitude: number }) => {
@@ -67,8 +100,8 @@ export default function App() {
   };
 
   return (
-    <div className={`naver-app-container ${isAlertActive ? 'danger-screen-alert' : ''}`}>
-      {/* 1. 위험 감지 시 나타나는 상단 경고 팝업 토스트 */}
+    <div className={`clean-app-container ${isAlertActive ? 'danger-screen-alert' : ''}`}>
+      {/* 1. 위험 감지 시 상단 경고 토스트 배너 */}
       {isAlertActive && (
         <div className="danger-toast-banner">
           <AlertCircle size={20} color="#FFFFFF" />
@@ -79,7 +112,7 @@ export default function App() {
         </div>
       )}
 
-      {/* 2. 네이버 지도 화이트 헤더 & 검색바 */}
+      {/* 2. 오리지널 클린 화이트 헤더 & 장소 검색바 */}
       <SafeHeader
         coords={coords}
         filters={filters}
@@ -89,11 +122,14 @@ export default function App() {
           setDestination(dest);
           triggerVibration('safe');
         }}
-        onClearDestination={() => setDestination(null)}
+        onClearDestination={() => {
+          setDestination(null);
+          setRouteData(null);
+        }}
         facilityCounts={facilityCounts}
       />
 
-      {/* 3. 브이월드 2D 메인 지도 & 터치 핀 */}
+      {/* 3. 브이월드 2D 메인 지도 & 실제 도로망 궤적 렌더링 */}
       <SafeMap
         currentCoords={coords}
         facilities={facilities}
@@ -101,23 +137,27 @@ export default function App() {
         showRoutes={showRoutes}
         selectedRouteType={selectedRouteType}
         destination={destination}
+        routeData={routeData}
+        isLoadingRoute={isLoadingRoute}
         onFacilityClick={(facility) => setSelectedFacility(facility)}
         onMapClickToSetDestination={handleMapClickToSetDestination}
       />
 
-      {/* 4. 네이버 지도 스타일 하단 바텀시트 */}
+      {/* 4. 하단 실제 도로망 길찾기 바텀시트 */}
       <ControlPanel
         startCoords={coords}
         destination={destination}
-        onClearDestination={() => setDestination(null)}
+        onClearDestination={() => {
+          setDestination(null);
+          setRouteData(null);
+        }}
         selectedFacility={selectedFacility}
         onCloseFacility={() => setSelectedFacility(null)}
-        showRoutes={showRoutes}
-        onToggleRoutes={() => setShowRoutes((prev) => !prev)}
         selectedRouteType={selectedRouteType}
         onSelectRouteType={handleSelectRouteType}
         onTriggerDangerAlert={alertDangerZone}
-        facilities={facilities}
+        routeData={routeData}
+        isLoadingRoute={isLoadingRoute}
       />
     </div>
   );

@@ -13,6 +13,7 @@ import VectorSource from 'ol/source/Vector';
 import VectorLayer from 'ol/layer/Vector';
 import { Style, Circle as CircleStyle, Fill, Stroke, Text } from 'ol/style';
 import { LocationCoords, SafetyFacility, MapFilterState, RouteType, DestinationPoint } from '../types';
+import { DualRouteResult } from '../services/pedestrianRouting';
 import { LocateFixed, Plus, Minus } from 'lucide-react';
 
 interface SafeMapProps {
@@ -22,6 +23,8 @@ interface SafeMapProps {
   showRoutes: boolean;
   selectedRouteType: RouteType;
   destination: DestinationPoint | null;
+  routeData: DualRouteResult | null;
+  isLoadingRoute: boolean;
   onFacilityClick?: (facility: SafetyFacility) => void;
   onMapClickToSetDestination?: (coords: { latitude: number; longitude: number }) => void;
 }
@@ -33,6 +36,8 @@ export const SafeMap: React.FC<SafeMapProps> = ({
   showRoutes,
   selectedRouteType,
   destination,
+  routeData,
+  isLoadingRoute,
   onFacilityClick,
   onMapClickToSetDestination,
 }) => {
@@ -84,11 +89,11 @@ export const SafeMap: React.FC<SafeMapProps> = ({
         maxZoom: 19,
         minZoom: 11,
       }),
-      controls: [], // 네이버 지도 전용 커스텀 플로팅 버튼 사용
+      controls: [], // 오리지널 커스텀 플로팅 버튼 사용
     });
 
-    // 지도 탭 이벤트: 시설물이 아닌 빈 곳을 터치하면 그 자리가 목적지가 됨!
-    map.on('click', (evt) => {
+    // 모바일 터치 오작동을 줄이기 위해 singleclick 이벤트 사용
+    map.on('singleclick', (evt) => {
       let clickedFacility = false;
       map.forEachFeatureAtPixel(evt.pixel, (feature) => {
         const facilityData = feature.get('facilityData') as SafetyFacility;
@@ -98,6 +103,7 @@ export const SafeMap: React.FC<SafeMapProps> = ({
         }
       });
 
+      // 시설물을 클릭한 것이 아닐 때 -> 터치한 좌표를 새로운 목적지로 지정
       if (!clickedFacility && onMapClickToSetDestination) {
         const lonLat = toLonLat(evt.coordinate);
         onMapClickToSetDestination({
@@ -114,7 +120,7 @@ export const SafeMap: React.FC<SafeMapProps> = ({
     };
   }, [vworldKey]);
 
-  // 2. 내 위치 마커 (네이버 지도 스타일 파란 원형 펄스)
+  // 2. 내 현재 위치 마커 (깔끔한 블루 펄스 링)
   useEffect(() => {
     if (!mapRef.current) return;
 
@@ -126,8 +132,8 @@ export const SafeMap: React.FC<SafeMapProps> = ({
       new Style({
         image: new CircleStyle({
           radius: 16,
-          fill: new Fill({ color: 'rgba(3, 199, 90, 0.2)' }),
-          stroke: new Stroke({ color: 'rgba(3, 199, 90, 0.6)', width: 1.5 }),
+          fill: new Fill({ color: 'rgba(37, 99, 235, 0.18)' }),
+          stroke: new Stroke({ color: 'rgba(37, 99, 235, 0.5)', width: 1.5 }),
         }),
       })
     );
@@ -137,8 +143,8 @@ export const SafeMap: React.FC<SafeMapProps> = ({
       new Style({
         image: new CircleStyle({
           radius: 8,
-          fill: new Fill({ color: '#03C75A' }),
-          stroke: new Stroke({ color: '#FFFFFF', width: 3 }),
+          fill: new Fill({ color: '#2563EB' }),
+          stroke: new Stroke({ color: '#FFFFFF', width: 2.5 }),
         }),
       })
     );
@@ -146,7 +152,7 @@ export const SafeMap: React.FC<SafeMapProps> = ({
     userSourceRef.current.addFeatures([pulseFeature, centerDot]);
   }, [currentCoords]);
 
-  // 3. 시설물 마커 렌더링 (CCTV / 가로등 / 비상벨)
+  // 3. 방범 시설물 마커 렌더링 (CCTV / 가로등 / 비상벨)
   useEffect(() => {
     facilitySourceRef.current.clear();
 
@@ -161,7 +167,7 @@ export const SafeMap: React.FC<SafeMapProps> = ({
         facilityData: item,
       });
 
-      let bgColor = '#2563EB';
+      let bgColor = '#3B82F6';
       let symbol = '📷';
 
       if (item.type === 'STREETLIGHT') {
@@ -191,20 +197,15 @@ export const SafeMap: React.FC<SafeMapProps> = ({
     });
   }, [facilities, filters]);
 
-  // 4. 동적 경로 그리기 (사용자가 찍은 목적지까지 실시간 연결)
+  // 4. 실제 도로망(보행로)을 따라 꺾어지는 진짜 경로 렌더링
   useEffect(() => {
     routeSourceRef.current.clear();
 
     if (!destination || !showRoutes || !currentCoords) return;
 
-    const startLng = currentCoords.longitude;
-    const startLat = currentCoords.latitude;
-    const destLng = destination.longitude;
-    const destLat = destination.latitude;
+    const destCoord = fromLonLat([destination.longitude, destination.latitude]);
 
-    const destCoord = fromLonLat([destLng, destLat]);
-
-    // 1) 목적지 네이버 스타일 빨간 핀 마커
+    // 1) 목적지 오리지널 핀 마커
     const destFeature = new Feature({
       geometry: new Point(destCoord),
     });
@@ -212,81 +213,78 @@ export const SafeMap: React.FC<SafeMapProps> = ({
       new Style({
         image: new CircleStyle({
           radius: 10,
-          fill: new Fill({ color: '#F43F5E' }),
+          fill: new Fill({ color: '#E11D48' }),
           stroke: new Stroke({ color: '#FFFFFF', width: 2.5 }),
         }),
         text: new Text({
           text: destination.name,
           font: 'bold 12px Pretendard, sans-serif',
           offsetY: -18,
-          fill: new Fill({ color: '#1E293B' }),
+          fill: new Fill({ color: '#0F172A' }),
           stroke: new Stroke({ color: '#FFFFFF', width: 3 }),
         }),
       })
     );
 
-    // 2) 최단 지름길 (직선 코스)
-    const midLng = (startLng + destLng) / 2;
-    const midLat = (startLat + destLat) / 2;
-    const shortestPathCoords = [
-      fromLonLat([startLng, startLat]),
-      fromLonLat([midLng, midLat]),
-      destCoord,
-    ];
+    // 2) 실제 도로망 궤적이 준비되었을 때 도로선을 따라 그리기
+    if (routeData) {
+      const isSafeSelected = selectedRouteType === 'safe';
 
-    const isShortestSelected = selectedRouteType === 'shortest';
-    const shortestRouteFeature = new Feature({
-      geometry: new LineString(shortestPathCoords),
-    });
-    shortestRouteFeature.setStyle(
-      new Style({
-        stroke: new Stroke({
-          color: isShortestSelected ? '#F43F5E' : 'rgba(244, 63, 94, 0.35)',
-          width: isShortestSelected ? 6 : 3,
-          lineDash: [8, 6],
-          lineCap: 'round',
-        }),
-      })
-    );
-
-    // 3) 안심 우회로 (가로등/대로변을 거치는 우회 곡선)
-    const safePathCoords = [
-      fromLonLat([startLng, startLat]),
-      fromLonLat([startLng + (destLng - startLng) * 0.3, startLat + (destLat - startLat) * 0.15]),
-      fromLonLat([startLng + (destLng - startLng) * 0.6, startLat + (destLat - startLat) * 0.85]),
-      destCoord,
-    ];
-
-    const isSafeSelected = selectedRouteType === 'safe';
-    const safeRouteFeature = new Feature({
-      geometry: new LineString(safePathCoords),
-    });
-    safeRouteFeature.setStyle(
-      new Style({
-        stroke: new Stroke({
-          color: isSafeSelected ? '#03C75A' : 'rgba(3, 199, 90, 0.35)',
-          width: isSafeSelected ? 7 : 4,
-          lineCap: 'round',
-        }),
-      })
-    );
-
-    if (isSafeSelected) {
-      routeSourceRef.current.addFeatures([shortestRouteFeature, safeRouteFeature, destFeature]);
-    } else {
-      routeSourceRef.current.addFeatures([safeRouteFeature, shortestRouteFeature, destFeature]);
-    }
-
-    // 목적지가 찍히면 내 위치와 목적지 중간으로 카메라 이동
-    if (mapRef.current) {
-      mapRef.current.getView().animate({
-        center: fromLonLat([(startLng + destLng) / 2, (startLat + destLat) / 2]),
-        duration: 500,
+      // 최단 지름길 (실제 도로 보행 궤적)
+      const shortestCoords = routeData.shortestRoute.coordinates.map((c) => fromLonLat(c));
+      const shortestRouteFeature = new Feature({
+        geometry: new LineString(shortestCoords),
       });
-    }
-  }, [destination, showRoutes, selectedRouteType, currentCoords]);
+      shortestRouteFeature.setStyle(
+        new Style({
+          stroke: new Stroke({
+            color: !isSafeSelected ? '#E11D48' : 'rgba(225, 29, 72, 0.35)',
+            width: !isSafeSelected ? 6 : 3,
+            lineDash: [8, 6],
+            lineCap: 'round',
+          }),
+        })
+      );
 
-  // 플로팅 지도 컨트롤 핸들러
+      // 안심 우회로 (안전시설물 밀집 및 큰길 위주 실제 도로 궤적)
+      const safeCoords = routeData.safeRoute.coordinates.map((c) => fromLonLat(c));
+      const safeRouteFeature = new Feature({
+        geometry: new LineString(safeCoords),
+      });
+      safeRouteFeature.setStyle(
+        new Style({
+          stroke: new Stroke({
+            color: isSafeSelected ? '#059669' : 'rgba(5, 150, 105, 0.35)',
+            width: isSafeSelected ? 7 : 4,
+            lineCap: 'round',
+          }),
+        })
+      );
+
+      if (isSafeSelected) {
+        routeSourceRef.current.addFeatures([shortestRouteFeature, safeRouteFeature, destFeature]);
+      } else {
+        routeSourceRef.current.addFeatures([safeRouteFeature, shortestRouteFeature, destFeature]);
+      }
+
+      // 화면에 출발지와 목적지 경로 전체가 예쁘게 들어오도록 자동 줌 맞춤
+      if (mapRef.current) {
+        const extent = routeSourceRef.current.getExtent();
+        if (extent && isFinite(extent[0])) {
+          mapRef.current.getView().fit(extent, {
+            padding: [90, 40, 200, 40],
+            duration: 600,
+            maxZoom: 17,
+          });
+        }
+      }
+    } else {
+      // 로딩 중일 때는 목적지 핀만 먼저 표시
+      routeSourceRef.current.addFeature(destFeature);
+    }
+  }, [destination, routeData, showRoutes, selectedRouteType, currentCoords]);
+
+  // 플로팅 컨트롤
   const handleRecenter = () => {
     if (!mapRef.current) return;
     mapRef.current.getView().animate({
@@ -310,17 +308,17 @@ export const SafeMap: React.FC<SafeMapProps> = ({
     <div className="map-wrapper">
       <div ref={mapElement} className="ol-map-container" />
 
-      {/* 네이버 지도 스타일 우측 플로팅 컨트롤 (현재 위치 & 줌) */}
-      <div className="naver-map-controls">
-        <button className="naver-ctrl-btn" onClick={handleRecenter} title="내 위치로 이동">
-          <LocateFixed size={18} color="#1E293B" />
+      {/* 우측 플로팅 컨트롤 (현재 위치 & 줌) */}
+      <div className="original-map-controls">
+        <button className="original-ctrl-btn" onClick={handleRecenter} title="내 위치로 이동">
+          <LocateFixed size={18} color="#0F172A" />
         </button>
         <div className="zoom-btn-group">
-          <button className="naver-ctrl-btn zoom-top" onClick={() => handleZoom(1)} title="확대">
-            <Plus size={16} color="#1E293B" />
+          <button className="original-ctrl-btn zoom-top" onClick={() => handleZoom(1)} title="확대">
+            <Plus size={16} color="#0F172A" />
           </button>
-          <button className="naver-ctrl-btn zoom-bottom" onClick={() => handleZoom(-1)} title="축소">
-            <Minus size={16} color="#1E293B" />
+          <button className="original-ctrl-btn zoom-bottom" onClick={() => handleZoom(-1)} title="축소">
+            <Minus size={16} color="#0F172A" />
           </button>
         </div>
       </div>
